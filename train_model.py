@@ -6,35 +6,34 @@ import pickle
 try:
     df = pd.read_csv("Sleep_health_and_lifestyle_dataset.csv")
 except FileNotFoundError:
-    print("Error: File dataset tidak ditemukan. Upload csv terlebih dahulu.")
+    print("Error: Dataset tidak ditemukan.")
     exit()
 
-# 2. PREPROCESSING (Sama persis dengan kode Anda)
+# 2. PREPROCESSING
 if 'Person ID' in df.columns: df = df.drop(columns=['Person ID'])
 if 'Blood Pressure' in df.columns:
-    bp_split = df['Blood Pressure'].str.split('/', expand=True).astype(float)
-    df['Systolic BP'] = bp_split[0]
-    df['Diastolic BP'] = bp_split[1]
-    df = df.drop(columns=['Blood Pressure'])
+    try:
+        bp_split = df['Blood Pressure'].str.split('/', expand=True).astype(float)
+        df['Systolic BP'] = bp_split[0]
+        df['Diastolic BP'] = bp_split[1]
+        df = df.drop(columns=['Blood Pressure'])
+    except: pass
 
 df['Gender'] = df['Gender'].replace({'Male': 1, 'Female': 0})
 df['Occupation'] = df['Occupation'].astype('category').cat.codes
 df['BMI Category'] = df['BMI Category'].astype('category').cat.codes
 if 'Age Group' in df.columns: df['Age Group'] = df['Age Group'].astype('category').cat.codes
-
 df['Sleep Disorder'] = df['Sleep Disorder'].replace({'None': 0, 'Sleep Apnea': 1, 'Insomnia': 1}).fillna(0).astype(int)
 
-# Simpan nama fitur untuk visualisasi pohon nanti
 numeric_cols = [c for c in df.columns if c not in ['Sleep Disorder'] and np.issubdtype(df[c].dtype, np.number)]
 X = df[numeric_cols].values.astype(float)
 y = df['Sleep Disorder'].values
 
-# Simpan parameter scaling agar input user bisa dinormalisasi sama seperti data training
 X_min = X.min(axis=0)
 X_max = X.max(axis=0)
 X_scaled = (X - X_min) / (X_max - X_min + 1e-8)
 
-# 3. RANDOM FOREST MANUAL (Fungsi training saja)
+# 3. RANDOM FOREST MANUAL
 def gini(y):
     if len(y) == 0: return 0
     p = np.mean(y)
@@ -73,17 +72,19 @@ def build_tree(X, y, depth=0, max_depth=3):
 
 def random_forest(X, y, n_trees=5, max_depth=3):
     trees = []
+    print("Sedang melatih Trees", end="")
     for _ in range(n_trees):
         idx = np.random.choice(len(X), len(X), replace=True)
         trees.append(build_tree(X[idx], y[idx], depth=0, max_depth=max_depth))
+        print(".", end="")
+    print(" Selesai.")
     return trees
 
-# Training Model
-print("Sedang melatih model... (Tunggu sebentar)")
-# Kita pakai n_trees=5 sesuai request opsi B (agar tidak terlalu berat tapi lengkap)
+# Eksekusi Training
+print("Mulai Training...")
 forest_model = random_forest(X_scaled, y, n_trees=5, max_depth=3)
 
-# 4. SIMPAN MODEL KE FILE
+# 4. SIMPAN MODEL
 data_to_save = {
     'forest': forest_model,
     'X_min': X_min,
@@ -93,5 +94,4 @@ data_to_save = {
 
 with open('model_sleep.pkl', 'wb') as f:
     pickle.dump(data_to_save, f)
-
-print("Sukses! Model disimpan sebagai 'model_sleep.pkl'.")
+print("SUKSES! File 'model_sleep.pkl' berhasil dibuat.")
