@@ -7,13 +7,11 @@ print("=== MEMULAI TRAINING ===")
 # 1. LOAD DATA
 try:
     df = pd.read_csv("Sleep_health_and_lifestyle_dataset.csv")
-    print(f"Dataset dimuat: {len(df)} baris data.")
 except FileNotFoundError:
     print("ERROR: File csv tidak ditemukan!")
     exit()
 
 # 2. PREPROCESSING
-# Hapus kolom ID jika ada
 if 'Person ID' in df.columns: df = df.drop(columns=['Person ID'])
 
 # Pecah Blood Pressure
@@ -23,43 +21,29 @@ try:
         df['systolic'] = bp_split[0]
         df['diastolic'] = bp_split[1]
     else:
-        # Jika tidak ada, beri nilai default rata-rata
         df['systolic'] = 120.0
         df['diastolic'] = 80.0
 except:
     df['systolic'] = 120.0
     df['diastolic'] = 80.0
 
-# Encoding Kategori
+# Encoding
 df['Gender'] = df['Gender'].replace({'Male': 1, 'Female': 0}).astype(float)
 df['Occupation'] = df['Occupation'].astype('category').cat.codes.astype(float)
 df['BMI Category'] = df['BMI Category'].astype('category').cat.codes.astype(float)
-
-# Target
 df['Sleep Disorder'] = df['Sleep Disorder'].replace({'None': 0, 'Sleep Apnea': 1, 'Insomnia': 1}).fillna(0).astype(int)
 
-# --- BAGIAN PENTING: PAKSA URUTAN KOLOM ---
-# Kita tentukan urutan baku agar tidak tertukar saat di Web
+# --- BAGIAN KRUSIAL: MENGUNCI URUTAN KOLOM ---
+# Kita paksa urutannya agar SAMA PERSIS dengan input di Web
 feature_order = [
-    'Gender', 
-    'Age', 
-    'Occupation', 
-    'Sleep Duration', 
-    'Quality of Sleep', 
-    'Physical Activity Level', 
-    'Stress Level', 
-    'BMI Category', 
-    'Heart Rate', 
-    'Daily Steps', 
-    'systolic', 
-    'diastolic'
+    'Gender', 'Age', 'Occupation', 'Sleep Duration', 'Quality of Sleep', 
+    'Physical Activity Level', 'Stress Level', 'BMI Category', 'Heart Rate', 
+    'Daily Steps', 'systolic', 'diastolic'
 ]
 
-# Cek apakah semua kolom ada
+# Pastikan semua kolom ada
 for col in feature_order:
-    if col not in df.columns:
-        print(f"Warning: Kolom {col} tidak ditemukan, mengisi dengan 0.")
-        df[col] = 0.0
+    if col not in df.columns: df[col] = 0.0
 
 X = df[feature_order].values.astype(float)
 y = df['Sleep Disorder'].values
@@ -68,8 +52,6 @@ y = df['Sleep Disorder'].values
 X_min = X.min(axis=0)
 X_max = X.max(axis=0)
 X_scaled = (X - X_min) / (X_max - X_min + 1e-8)
-
-print(f"Melatih dengan {X.shape[1]} fitur: {feature_order}")
 
 # 3. RANDOM FOREST MANUAL
 def gini(y):
@@ -87,9 +69,9 @@ def best_split(X, y):
     n_features = X.shape[1]
     for feat in range(n_features):
         thresholds = np.unique(X[:, feat])
-        # Optimasi: Skip jika terlalu banyak threshold, ambil sampel saja
-        if len(thresholds) > 20: 
-            thresholds = np.percentile(thresholds, np.linspace(0, 100, 20))
+        # Optimasi kecepatan: Jika threshold terlalu banyak, ambil sampel saja
+        if len(thresholds) > 50:
+            thresholds = np.percentile(thresholds, np.linspace(0, 100, 50))
             
         for thr in thresholds:
             X_l, y_l, X_r, y_r = split_data(X, y, feat, thr)
@@ -99,7 +81,7 @@ def best_split(X, y):
                 best_gini, best_feat, best_thr = g, feat, thr
     return best_feat, best_thr
 
-def build_tree(X, y, depth=0, max_depth=5): # Max depth dinaikkan sedikit
+def build_tree(X, y, depth=0, max_depth=5):
     if len(set(y)) == 1 or depth == max_depth or len(y) < 2:
         val = np.round(np.mean(y)) if len(y) > 0 else 0
         return {'label': val}
@@ -110,15 +92,14 @@ def build_tree(X, y, depth=0, max_depth=5): # Max depth dinaikkan sedikit
     
     X_l, y_l, X_r, y_r = split_data(X, y, feat, thr)
     return {
-        'feature': feat, 
-        'threshold': thr,
+        'feature': feat, 'threshold': thr,
         'left': build_tree(X_l, y_l, depth+1, max_depth),
         'right': build_tree(X_r, y_r, depth+1, max_depth)
     }
 
+print("Sedang melatih 5 Pohon Keputusan...")
 trees = []
-for i in range(5): # 5 Pohon
-    print(f"Melatih pohon ke-{i+1}...")
+for i in range(5):
     idx = np.random.choice(len(X), len(X), replace=True)
     trees.append(build_tree(X[idx], y[idx]))
 
@@ -127,7 +108,7 @@ data_to_save = {
     'forest': trees,
     'X_min': X_min,
     'X_max': X_max,
-    'feature_names': feature_order
+    'feature_names': feature_order # Kita simpan nama urutan kolomnya juga
 }
 
 with open('model_sleep.pkl', 'wb') as f:
