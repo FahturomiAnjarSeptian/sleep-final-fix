@@ -2,63 +2,76 @@ from flask import Flask, render_template, request
 import numpy as np
 import pickle
 import matplotlib
-matplotlib.use('Agg') # PENTING AGAR TIDAK ERROR DI SERVER
+matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 import io
 import base64
+import sys
 
 app = Flask(__name__)
 
-# Load Model
-model_path = 'model_sleep.pkl'
-forest = []
-X_min = 0
-X_max = 1
-feature_names = []
+# --- LOAD MODEL ---
+model_path = '/home/anjarranjayy/sleep-final-fix/model_sleep.pkl'
+# (Path lengkap agar aman, sesuaikan username jika perlu)
 
+data = {}
 try:
-    with open(model_path, 'rb') as f:
-        saved_data = pickle.load(f)
-    forest = saved_data['forest']
-    X_min = saved_data['X_min']
-    X_max = saved_data['X_max']
-    feature_names = saved_data['feature_names']
+    with open('model_sleep.pkl', 'rb') as f:
+        data = pickle.load(f)
 except:
-    print("Model belum ada. Jalankan train_model.py dulu.")
+    # Coba path absolute jika relative gagal
+    try:
+        with open(model_path, 'rb') as f:
+            data = pickle.load(f)
+    except Exception as e:
+        print(f"ERROR LOAD MODEL: {e}", file=sys.stderr)
 
-def predict_tree(tree, x):
-    if 'label' in tree: return tree['label']
-    if x[tree['feature']] < tree['threshold']:
-        return predict_tree(tree['left'], x)
+forest = data.get('forest', [])
+X_min = data.get('X_min', np.zeros(12))
+X_max = data.get('X_max', np.ones(12))
+feature_names = data.get('feature_names', [])
+
+def predict_single_tree(node, x):
+    if 'label' in node:
+        return node['label']
+    
+    # Cek input feature index
+    feat_idx = node['feature']
+    threshold = node['threshold']
+    
+    if x[feat_idx] < threshold:
+        return predict_single_tree(node['left'], x)
     else:
-        return predict_tree(tree['right'], x)
-
-def predict_forest(trees, X_input):
-    preds = [predict_tree(t, X_input[0]) for t in trees]
-    return int(np.round(np.mean(preds)))
+        return predict_single_tree(node['right'], x)
 
 def get_tree_image(tree, feature_names, title):
-    plt.figure(figsize=(8, 5))
-    ax = plt.gca()
-    ax.set_title(title, fontsize=10)
-    ax.axis("off")
-    
-    def recurse(node, x=0.5, y=1.0, dx=0.25, dy=0.15):
-        if 'label' in node:
-            ax.text(x, y, f"Leaf: {int(node['label'])}", ha='center', va='center', bbox=dict(boxstyle="round", fc="#90EE90"))
-            return
-        feat_name = feature_names[node['feature']]
-        ax.text(x, y, f"{feat_name}\n< {node['threshold']:.2f}", ha='center', va='center', bbox=dict(boxstyle="round", fc="#ADD8E6"))
-        ax.plot([x, x-dx], [y-0.02, y-dy+0.02], 'k-')
-        recurse(node['left'], x-dx, y-dy, dx*0.5, dy)
-        ax.plot([x, x+dx], [y-0.02, y-dy+0.02], 'k-')
-        recurse(node['right'], x+dx, y-dy, dx*0.5, dy)
+    try:
+        plt.figure(figsize=(6, 4))
+        ax = plt.gca()
+        ax.set_title(title)
+        ax.axis("off")
+        
+        def recurse(node, x=0.5, y=1.0, dx=0.25, dy=0.15):
+            if 'label' in node:
+                ax.text(x, y, f"Leaf:{int(node['label'])}", ha='center', bbox=dict(boxstyle="round", fc="lightgreen"))
+                return
+            
+            fname = feature_names[node['feature']] if feature_names else str(node['feature'])
+            ax.text(x, y, f"{fname}\n<{node['threshold']:.2f}", ha='center', bbox=dict(boxstyle="round", fc="lightblue"))
+            
+            ax.plot([x, x-dx], [y-0.02, y-dy+0.02], 'k-')
+            recurse(node['left'], x-dx, y-dy, dx*0.5, dy)
+            ax.plot([x, x+dx], [y-0.02, y-dy+0.02], 'k-')
+            recurse(node['right'], x+dx, y-dy, dx*0.5, dy)
 
-    recurse(tree)
-    img = io.BytesIO()
-    plt.savefig(img, format='png', bbox_inches='tight')
-    img.seek(0)
-    return base64.b64encode(img.getvalue()).decode()
+        recurse(tree)
+        img = io.BytesIO()
+        plt.savefig(img, format='png', bbox_inches='tight')
+        img.seek(0)
+        plt.close()
+        return base64.b64encode(img.getvalue()).decode()
+    except:
+        return ""
 
 @app.route('/', methods=['GET', 'POST'])
 def index():
@@ -67,26 +80,53 @@ def index():
     
     if request.method == 'POST':
         try:
-            # Ambil input form dan ubah ke float
-            inputs = [
-                float(request.form.get(name)) for name in 
-                ['gender', 'age', 'occupation', 'sleep_duration', 'quality_sleep',
-                 'phys_activity', 'stress', 'bmi', 'heart_rate', 'daily_steps', 
-                 'systolic', 'diastolic']
+            # URUTAN INI HARUS SAMA PERSIS DENGAN train_model.py
+            # 1. Gender, 2. Age, 3. Occ, 4. SleepDur, 5. QualSleep, 
+            # 6. PhysAct, 7. Stress, 8. BMI, 9. Heart, 10. Steps, 
+            # 11. SysBP, 12. DiaBP
+            
+            vals = [
+                float(request.form.get('gender')),
+                float(request.form.get('age')),
+                float(request.form.get('occupation')),
+                float(request.form.get('sleep_duration')),
+                float(request.form.get('quality_sleep')),
+                float(request.form.get('phys_activity')),
+                float(request.form.get('stress')),
+                float(request.form.get('bmi')),
+                float(request.form.get('heart_rate')),
+                float(request.form.get('daily_steps')),
+                float(request.form.get('systolic')),
+                float(request.form.get('diastolic'))
             ]
             
-            input_data = np.array([inputs])
-            input_scaled = (input_data - X_min) / (X_max - X_min + 1e-8)
+            input_arr = np.array(vals)
             
-            pred = predict_forest(forest, input_scaled)
-            res_str = "Gangguan Tidur Terdeteksi" if pred == 1 else "Tidur Normal"
-            prediction_text = f"Hasil: {res_str}"
+            # Debug: Print input ke Error Log
+            print(f"INPUT USER: {input_arr}", file=sys.stderr)
             
-            # Gambar semua pohon
+            # Normalisasi
+            input_scaled = (input_arr - X_min) / (X_max - X_min + 1e-8)
+            
+            # Prediksi Voting
+            votes = []
+            for t in forest:
+                votes.append(predict_single_tree(t, input_scaled))
+            
+            final_pred = int(np.round(np.mean(votes)))
+            print(f"HASIL VOTING: {votes} -> {final_pred}", file=sys.stderr)
+            
+            status = "NORMAL (SEHAT)" if final_pred == 0 else "TERDETEKSI GANGGUAN TIDUR"
+            color = "green" if final_pred == 0 else "red"
+            prediction_text = f"<h3 style='color:{color}'>{status}</h3>"
+            
+            # Visualisasi
             for i, tree in enumerate(forest):
-                tree_plots.append(get_tree_image(tree, feature_names, f"Pohon {i+1}"))
-                
+                plot = get_tree_image(tree, feature_names, f"Tree {i+1}")
+                if plot: tree_plots.append(plot)
+
         except Exception as e:
             prediction_text = f"Error: {str(e)}"
+            print(f"ERROR APP: {e}", file=sys.stderr)
 
     return render_template('index.html', prediction_text=prediction_text, tree_plots=tree_plots)
