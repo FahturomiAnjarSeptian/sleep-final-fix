@@ -11,38 +11,35 @@ import os
 
 app = Flask(__name__)
 
-# --- KONFIGURASI PATH ---
+# --- KONFIGURASI PATH ABSOLUT (PENTING) ---
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 MODEL_PATH = os.path.join(BASE_DIR, 'model_sleep.pkl')
 
-# --- DEFINISI VARIABEL DEFAULT (Supaya Tidak Error 'Not Defined') ---
+# --- DEFINISI VARIABEL GLOBAL (Agar tidak error 'Not Defined') ---
 forest = []
-X_min = 0
-X_max = 1
+X_min = np.zeros(12) # Default dummy
+X_max = np.ones(12)  # Default dummy
 feature_names = []
 
-# --- COBA LOAD MODEL ---
+# --- LOAD MODEL ---
 try:
     with open(MODEL_PATH, 'rb') as f:
         data = pickle.load(f)
-    # Jika berhasil load, timpa variabel default dengan data asli
     forest = data.get('forest', [])
-    X_min = data.get('X_min', 0)
-    X_max = data.get('X_max', 1)
+    X_min = data.get('X_min', np.zeros(12))
+    X_max = data.get('X_max', np.ones(12))
     feature_names = data.get('feature_names', [])
-    print("Model BERHASIL dimuat.", file=sys.stderr)
+    print(f"Model berhasil dimuat dari {MODEL_PATH}", file=sys.stderr)
 except Exception as e:
-    print(f"Model GAGAL dimuat (Pakai default): {e}", file=sys.stderr)
+    print(f"GAGAL LOAD MODEL dari {MODEL_PATH}: {e}", file=sys.stderr)
 
-# --- FUNGSI PENDUKUNG ---
+# --- FUNGSI ---
 def predict_single_tree(tree, x):
     if not isinstance(tree, dict): return 0
     if 'label' in tree: return tree['label']
     if tree['feature'] >= len(x): return 0
-    if x[tree['feature']] < tree['threshold']:
-        return predict_single_tree(tree['left'], x)
-    else:
-        return predict_single_tree(tree['right'], x)
+    if x[tree['feature']] < tree['threshold']: return predict_single_tree(tree['left'], x)
+    else: return predict_single_tree(tree['right'], x)
 
 def get_tree_image(tree, feature_names, title):
     try:
@@ -75,56 +72,43 @@ def index():
     
     if request.method == 'POST':
         try:
-            # Pastikan model sudah ada
+            # PENTING: Jika model kosong, beri peringatan tapi JANGAN CRASH
             if not forest:
-                return render_template('index.html', prediction_text="<h3 style='color:red'>Error: Model belum dilatih! Jalankan train_model.py di server.</h3>")
+                return render_template('index.html', prediction_text="<h3 style='color:red'>Error: Model file tidak ditemukan atau kosong. Cek Log Error.</h3>")
 
             raw_vals = [
-                float(request.form.get('gender', 0)),
-                float(request.form.get('age', 30)),
-                float(request.form.get('occupation', 2)),
-                float(request.form.get('sleep_duration', 7)),
-                float(request.form.get('quality_sleep', 7)),
-                float(request.form.get('phys_activity', 60)),
-                float(request.form.get('stress', 5)),
-                float(request.form.get('bmi', 0)),
-                float(request.form.get('heart_rate', 70)),
-                float(request.form.get('daily_steps', 5000)),
-                float(request.form.get('systolic', 120)),
-                float(request.form.get('diastolic', 80))
+                float(request.form.get('gender', 0)), float(request.form.get('age', 30)),
+                float(request.form.get('occupation', 2)), float(request.form.get('sleep_duration', 7)),
+                float(request.form.get('quality_sleep', 7)), float(request.form.get('phys_activity', 60)),
+                float(request.form.get('stress', 5)), float(request.form.get('bmi', 0)),
+                float(request.form.get('heart_rate', 70)), float(request.form.get('daily_steps', 5000)),
+                float(request.form.get('systolic', 120)), float(request.form.get('diastolic', 80))
             ]
             
             input_arr = np.array(raw_vals)
-            # Normalisasi
             input_scaled = (input_arr - X_min) / (X_max - X_min + 1e-8)
             
-            # Prediksi & Debugging
             votes = []
-            debug_info = "<div style='font-size:12px; text-align:left; margin-top:10px; background:#f0f0f0; padding:10px;'><b>DEBUG INFO:</b><br>"
-            
+            debug_info = "<div style='background:#eee; padding:10px; font-size:12px; margin-top:10px'><b>DEBUG:</b><br>"
             for i, t in enumerate(forest):
                 v = predict_single_tree(t, input_scaled)
-                val = 0
-                if v is not None and not np.isnan(v): val = int(v)
-                votes.append(val)
-                debug_info += f"Tree {i+1}: {val}<br>"
+                if v is not None and not np.isnan(v):
+                    votes.append(int(v))
+                    debug_info += f"Tree {i+1}: {int(v)}<br>"
             
             final_pred = 0
-            if votes:
-                final_pred = int(np.round(np.mean(votes)))
-            
+            if votes: final_pred = int(np.round(np.mean(votes)))
             debug_info += f"<b>Final: {final_pred}</b></div>"
 
             status = "NORMAL (SEHAT)" if final_pred == 0 else "TERDETEKSI GANGGUAN TIDUR"
             color = "green" if final_pred == 0 else "red"
             prediction_text = f"<h2 style='color:{color}'>{status}</h2>{debug_info}"
             
-            # Gambar (Limit 3)
             for i in range(min(3, len(forest))):
                 img = get_tree_image(forest[i], feature_names, f"Tree {i+1}")
                 if img: tree_plots.append(img)
                         
         except Exception as e:
-            prediction_text = f"Error: {str(e)}"
+            prediction_text = f"Error System: {str(e)}"
 
     return render_template('index.html', prediction_text=prediction_text, tree_plots=tree_plots)
