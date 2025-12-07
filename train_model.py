@@ -2,7 +2,7 @@ import numpy as np
 import pandas as pd
 import pickle
 
-print("=== MEMULAI TRAINING ===")
+print("=== MEMULAI TRAINING (DENGAN OVERSAMPLING) ===")
 
 # 1. LOAD DATA
 try:
@@ -31,22 +31,29 @@ except:
 df['Gender'] = df['Gender'].replace({'Male': 1, 'Female': 0}).astype(float)
 df['Occupation'] = df['Occupation'].astype('category').cat.codes.astype(float)
 df['BMI Category'] = df['BMI Category'].astype('category').cat.codes.astype(float)
+# Target: 0=Sehat, 1=Sakit
 df['Sleep Disorder'] = df['Sleep Disorder'].replace({'None': 0, 'Sleep Apnea': 1, 'Insomnia': 1}).fillna(0).astype(int)
 
-# --- BAGIAN KRUSIAL: MENGUNCI URUTAN KOLOM ---
-# Kita paksa urutannya agar SAMA PERSIS dengan input di Web
+# --- OVERSAMPLING (Teknik agar tidak selalu prediksi Normal) ---
+# Kita duplikasi data orang yang sakit agar jumlahnya seimbang
+data_sakit = df[df['Sleep Disorder'] == 1]
+data_sehat = df[df['Sleep Disorder'] == 0]
+# Gabungkan data sehat + data sakit (dikali 2 biar banyak)
+df_balanced = pd.concat([data_sehat, data_sakit, data_sakit], axis=0).reset_index(drop=True)
+print(f"Data asli: {len(df)}, Data setelah oversampling: {len(df_balanced)}")
+
+# Urutan Fitur Baku
 feature_order = [
     'Gender', 'Age', 'Occupation', 'Sleep Duration', 'Quality of Sleep', 
     'Physical Activity Level', 'Stress Level', 'BMI Category', 'Heart Rate', 
     'Daily Steps', 'systolic', 'diastolic'
 ]
 
-# Pastikan semua kolom ada
 for col in feature_order:
-    if col not in df.columns: df[col] = 0.0
+    if col not in df_balanced.columns: df_balanced[col] = 0.0
 
-X = df[feature_order].values.astype(float)
-y = df['Sleep Disorder'].values
+X = df_balanced[feature_order].values.astype(float)
+y = df_balanced['Sleep Disorder'].values
 
 # Scaling
 X_min = X.min(axis=0)
@@ -69,10 +76,8 @@ def best_split(X, y):
     n_features = X.shape[1]
     for feat in range(n_features):
         thresholds = np.unique(X[:, feat])
-        # Optimasi kecepatan: Jika threshold terlalu banyak, ambil sampel saja
-        if len(thresholds) > 50:
-            thresholds = np.percentile(thresholds, np.linspace(0, 100, 50))
-            
+        if len(thresholds) > 30: # Optimasi
+            thresholds = np.percentile(thresholds, np.linspace(0, 100, 30))
         for thr in thresholds:
             X_l, y_l, X_r, y_r = split_data(X, y, feat, thr)
             if len(y_l) == 0 or len(y_r) == 0: continue
@@ -83,13 +88,10 @@ def best_split(X, y):
 
 def build_tree(X, y, depth=0, max_depth=5):
     if len(set(y)) == 1 or depth == max_depth or len(y) < 2:
-        val = np.round(np.mean(y)) if len(y) > 0 else 0
-        return {'label': val}
-    
+        return {'label': np.round(np.mean(y))}
     feat, thr = best_split(X, y)
     if feat is None:
         return {'label': np.round(np.mean(y))}
-    
     X_l, y_l, X_r, y_r = split_data(X, y, feat, thr)
     return {
         'feature': feat, 'threshold': thr,
@@ -97,21 +99,16 @@ def build_tree(X, y, depth=0, max_depth=5):
         'right': build_tree(X_r, y_r, depth+1, max_depth)
     }
 
-print("Sedang melatih 5 Pohon Keputusan...")
 trees = []
-for i in range(5):
+print("Melatih 7 Pohon...", end="")
+for i in range(7): # Naikkan jadi 7 pohon
     idx = np.random.choice(len(X), len(X), replace=True)
     trees.append(build_tree(X[idx], y[idx]))
+    print(".", end="")
 
-# 4. SIMPAN
 data_to_save = {
-    'forest': trees,
-    'X_min': X_min,
-    'X_max': X_max,
-    'feature_names': feature_order # Kita simpan nama urutan kolomnya juga
+    'forest': trees, 'X_min': X_min, 'X_max': X_max, 'feature_names': feature_order
 }
-
 with open('model_sleep.pkl', 'wb') as f:
     pickle.dump(data_to_save, f)
-
-print("=== SUKSES! Model disimpan. ===")
+print("\n=== SUKSES! Model disimpan ===")
