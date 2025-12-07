@@ -10,19 +10,31 @@ import sys
 import os
 
 app = Flask(__name__)
+
+# --- KONFIGURASI PATH ---
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 MODEL_PATH = os.path.join(BASE_DIR, 'model_sleep.pkl')
 
+# --- DEFINISI VARIABEL DEFAULT (Supaya Tidak Error 'Not Defined') ---
+forest = []
+X_min = 0
+X_max = 1
+feature_names = []
+
+# --- COBA LOAD MODEL ---
 try:
     with open(MODEL_PATH, 'rb') as f:
         data = pickle.load(f)
+    # Jika berhasil load, timpa variabel default dengan data asli
     forest = data.get('forest', [])
     X_min = data.get('X_min', 0)
     X_max = data.get('X_max', 1)
     feature_names = data.get('feature_names', [])
-except:
-    print("Model Error", file=sys.stderr)
+    print("Model BERHASIL dimuat.", file=sys.stderr)
+except Exception as e:
+    print(f"Model GAGAL dimuat (Pakai default): {e}", file=sys.stderr)
 
+# --- FUNGSI PENDUKUNG ---
 def predict_single_tree(tree, x):
     if not isinstance(tree, dict): return 0
     if 'label' in tree: return tree['label']
@@ -38,7 +50,9 @@ def get_tree_image(tree, feature_names, title):
         ax = plt.gca(); ax.set_title(title); ax.axis("off")
         def recurse(node, x=0.5, y=1.0, dx=0.25, dy=0.15):
             if 'label' in node:
-                ax.text(x, y, f"Leaf:{int(node['label'])}", ha='center', bbox=dict(boxstyle="round", fc="lightgreen"))
+                val = 0
+                if not np.isnan(node['label']): val = int(node['label'])
+                ax.text(x, y, f"Leaf:{val}", ha='center', bbox=dict(boxstyle="round", fc="lightgreen"))
                 return
             fname = str(node['feature'])
             if feature_names and node['feature'] < len(feature_names): fname = feature_names[node['feature']]
@@ -61,7 +75,10 @@ def index():
     
     if request.method == 'POST':
         try:
-            # INPUT
+            # Pastikan model sudah ada
+            if not forest:
+                return render_template('index.html', prediction_text="<h3 style='color:red'>Error: Model belum dilatih! Jalankan train_model.py di server.</h3>")
+
             raw_vals = [
                 float(request.form.get('gender', 0)),
                 float(request.form.get('age', 30)),
@@ -81,43 +98,31 @@ def index():
             # Normalisasi
             input_scaled = (input_arr - X_min) / (X_max - X_min + 1e-8)
             
-            # Prediksi & DEBUG LOG
+            # Prediksi & Debugging
             votes = []
-            debug_info = "<div style='font-size:12px; text-align:left; margin-top:10px; background:#f0f0f0; padding:10px;'>"
-            debug_info += "<b>--- DEBUG INFO (Screenshot Ini) ---</b><br>"
+            debug_info = "<div style='font-size:12px; text-align:left; margin-top:10px; background:#f0f0f0; padding:10px;'><b>DEBUG INFO:</b><br>"
             
             for i, t in enumerate(forest):
                 v = predict_single_tree(t, input_scaled)
-                # Cek hasil vote
-                vote_res = "NaN"
-                if v is not None and not np.isnan(v):
-                    vote_res = int(v)
-                    votes.append(vote_res)
-                debug_info += f"Pohon {i+1}: {vote_res}<br>"
+                val = 0
+                if v is not None and not np.isnan(v): val = int(v)
+                votes.append(val)
+                debug_info += f"Tree {i+1}: {val}<br>"
             
-            # Hitung Final
             final_pred = 0
-            avg_vote = 0
             if votes:
-                avg_vote = np.mean(votes)
-                final_pred = int(np.round(avg_vote))
+                final_pred = int(np.round(np.mean(votes)))
             
-            debug_info += f"<b>Rata-rata Vote: {avg_vote:.2f} -> Hasil Akhir: {final_pred}</b><br>"
-            debug_info += f"Input Scaled (Contoh Age): {input_scaled[1]:.2f} (Harusnya 0.0 - 1.0)<br>"
-            debug_info += "</div>"
+            debug_info += f"<b>Final: {final_pred}</b></div>"
 
-            # TAMPILAN HASIL
-            status = "NORMAL (SEHAT)" if final_pred == 0 else "TERDETEKSI GANGGUAN TIDUR!"
+            status = "NORMAL (SEHAT)" if final_pred == 0 else "TERDETEKSI GANGGUAN TIDUR"
             color = "green" if final_pred == 0 else "red"
-            
-            # KITA TEMPEL DEBUG INFO DI BAWAH HASIL
             prediction_text = f"<h2 style='color:{color}'>{status}</h2>{debug_info}"
             
-            # Gambar (Limit 3 pohon)
-            if forest:
-                for i in range(min(3, len(forest))):
-                    img = get_tree_image(forest[i], feature_names, f"Pohon {i+1}")
-                    if img: tree_plots.append(img)
+            # Gambar (Limit 3)
+            for i in range(min(3, len(forest))):
+                img = get_tree_image(forest[i], feature_names, f"Tree {i+1}")
+                if img: tree_plots.append(img)
                         
         except Exception as e:
             prediction_text = f"Error: {str(e)}"
