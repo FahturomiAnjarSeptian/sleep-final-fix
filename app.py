@@ -10,14 +10,18 @@ import sys
 import os
 
 app = Flask(__name__)
+
+# --- KUNCI LOKASI PASTI (SAMA DENGAN TRAIN) ---
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 MODEL_PATH = os.path.join(BASE_DIR, 'model_sleep.pkl')
 
-# Variabel Default (Anti-Crash)
+# VARIABEL DEFAULT (PENTING AGAR TIDAK ERROR 'NOT DEFINED')
 forest = []
-X_min = np.zeros(12); X_max = np.ones(12)
+X_min = np.zeros(12)
+X_max = np.ones(12)
 feature_names = []
 
+# LOAD MODEL
 try:
     with open(MODEL_PATH, 'rb') as f:
         data = pickle.load(f)
@@ -25,9 +29,11 @@ try:
     X_min = data.get('X_min', np.zeros(12))
     X_max = data.get('X_max', np.ones(12))
     feature_names = data.get('feature_names', [])
-except:
-    pass # Silent fail agar web tetap nyala
+    print(f"INFO: Model dimuat dari {MODEL_PATH}", file=sys.stderr)
+except Exception as e:
+    print(f"ERROR LOAD MODEL: {e}", file=sys.stderr)
 
+# FUNGSI PENDUKUNG
 def predict_tree(node, x):
     if not isinstance(node, dict): return 0
     if 'label' in node: return node['label']
@@ -42,11 +48,11 @@ def get_tree_image(tree, fnames, title):
         def recurse(n, x=0.5, y=1.0, dx=0.25, dy=0.15):
             if 'label' in n:
                 val = int(n['label']) if not np.isnan(n['label']) else 0
-                ax.text(x, y, f"Leaf:{val}", ha='center', bbox=dict(boxstyle="round", fc="lightgreen"))
+                ax.text(x, y, f"L:{val}", ha='center', bbox=dict(boxstyle="round", fc="#90EE90"))
                 return
             fn = str(n['feature'])
             if fnames and n['feature'] < len(fnames): fn = fnames[n['feature']]
-            ax.text(x, y, f"{fn}\n<{n['threshold']:.2f}", ha='center', bbox=dict(boxstyle="round", fc="lightblue"))
+            ax.text(x, y, f"{fn}<{n['threshold']:.1f}", ha='center', bbox=dict(boxstyle="round", fc="#ADD8E6"))
             ax.plot([x, x-dx], [y-0.02, y-dy+0.02], 'k-')
             recurse(n['left'], x-dx, y-dy, dx*0.5, dy)
             ax.plot([x, x+dx], [y-0.02, y-dy+0.02], 'k-')
@@ -65,10 +71,10 @@ def index():
     
     if request.method == 'POST':
         try:
+            # Cek Model
             if not forest:
-                return render_template('index.html', prediction_text="<h3 style='color:red'>Error: Model file hilang. Jalankan python train_model.py</h3>")
+                return render_template('index.html', prediction_text=f"<h3 style='color:red'>Error: File Model Tidak Ada di {MODEL_PATH}. Jalankan 'python train_model.py' di Console!</h3>")
 
-            # Input WAJIB urut sesuai train_model.py
             raw = [
                 float(request.form.get('gender', 0)), float(request.form.get('age', 30)),
                 float(request.form.get('occupation', 2)), float(request.form.get('sleep_duration', 7)),
@@ -95,7 +101,7 @@ def index():
             for i in range(min(3, len(forest))):
                 img = get_tree_image(forest[i], feature_names, f"Tree {i+1}")
                 if img: tree_plots.append(img)
-
+                        
         except Exception as e:
             prediction_text = f"Error: {e}"
 
