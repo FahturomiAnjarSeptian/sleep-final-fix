@@ -11,29 +11,34 @@ import os
 
 app = Flask(__name__)
 
-# --- KUNCI LOKASI PASTI (SAMA DENGAN TRAIN) ---
+# --- 1. KUNCI LOKASI PASTI (ABSOLUTE PATH) ---
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 MODEL_PATH = os.path.join(BASE_DIR, 'model_sleep.pkl')
 
-# VARIABEL DEFAULT (PENTING AGAR TIDAK ERROR 'NOT DEFINED')
+# --- 2. DEFINISI VARIABEL DEFAULT (ANTI CRASH) ---
+# Ini Wajib ada di luar 'try' supaya variabelnya selalu dikenal
 forest = []
-X_min = np.zeros(12)
-X_max = np.ones(12)
 feature_names = []
+X_min = np.zeros(12) # Angka dummy sementara
+X_max = np.ones(12)  # Angka dummy sementara
 
-# LOAD MODEL
+# --- 3. LOAD MODEL ---
 try:
     with open(MODEL_PATH, 'rb') as f:
         data = pickle.load(f)
+    
+    # Kalau berhasil load, baru kita timpa variabel default tadi
     forest = data.get('forest', [])
     X_min = data.get('X_min', np.zeros(12))
     X_max = data.get('X_max', np.ones(12))
     feature_names = data.get('feature_names', [])
-    print(f"INFO: Model dimuat dari {MODEL_PATH}", file=sys.stderr)
-except Exception as e:
-    print(f"ERROR LOAD MODEL: {e}", file=sys.stderr)
+    print(f"INFO: Model sukses dimuat dari {MODEL_PATH}", file=sys.stderr)
 
-# FUNGSI PENDUKUNG
+except Exception as e:
+    # Kalau gagal, web JANGAN CRASH. Cukup catat errornya.
+    print(f"WARNING: Gagal load model. Error: {e}", file=sys.stderr)
+
+# --- FUNGSI PENDUKUNG ---
 def predict_tree(node, x):
     if not isinstance(node, dict): return 0
     if 'label' in node: return node['label']
@@ -71,9 +76,10 @@ def index():
     
     if request.method == 'POST':
         try:
-            # Cek Model
+            # Cek apakah model ada isinya
             if not forest:
-                return render_template('index.html', prediction_text=f"<h3 style='color:red'>Error: File Model Tidak Ada di {MODEL_PATH}. Jalankan 'python train_model.py' di Console!</h3>")
+                # Pesan error yang jelas di layar
+                return render_template('index.html', prediction_text=f"<h3 style='color:red'>Error: Model file hilang atau rusak.<br>Jalankan 'python train_model.py' di Console Server!</h3>")
 
             raw = [
                 float(request.form.get('gender', 0)), float(request.form.get('age', 30)),
@@ -84,6 +90,7 @@ def index():
                 float(request.form.get('systolic', 120)), float(request.form.get('diastolic', 80))
             ]
             
+            # Rumus Scaling (Aman karena X_min sudah pasti ada)
             x = (np.array(raw) - X_min) / (X_max - X_min + 1e-8)
             
             votes = []
@@ -103,6 +110,6 @@ def index():
                 if img: tree_plots.append(img)
                         
         except Exception as e:
-            prediction_text = f"Error: {e}"
+            prediction_text = f"Error System: {e}"
 
     return render_template('index.html', prediction_text=prediction_text, tree_plots=tree_plots)

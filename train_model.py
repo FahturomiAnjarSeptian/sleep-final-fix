@@ -4,24 +4,22 @@ import pickle
 import os
 
 # --- KUNCI LOKASI PASTI (ABSOLUTE PATH) ---
-# Ini mendeteksi folder tempat file ini berada
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 DATA_PATH = os.path.join(BASE_DIR, 'Sleep_health_and_lifestyle_dataset.csv')
 MODEL_PATH = os.path.join(BASE_DIR, 'model_sleep.pkl')
 
 print(f"=== MULAI TRAINING ===")
 print(f"Lokasi Script: {BASE_DIR}")
-print(f"Target Simpan: {MODEL_PATH}")
 
 # 1. LOAD DATA
 try:
     df = pd.read_csv(DATA_PATH)
     print("Dataset ditemukan.")
 except FileNotFoundError:
-    print(f"ERROR FATAL: Dataset tidak ada di {DATA_PATH}")
+    print(f"ERROR: Dataset tidak ada di {DATA_PATH}")
     exit()
 
-# 2. PREPROCESSING SIMPLE
+# 2. PREPROCESSING
 if 'Person ID' in df.columns: df = df.drop(columns=['Person ID'])
 
 try:
@@ -38,7 +36,7 @@ df['Occupation'] = df['Occupation'].astype('category').cat.codes.astype(float)
 df['BMI Category'] = df['BMI Category'].astype('category').cat.codes.astype(float)
 df['Sleep Disorder'] = df['Sleep Disorder'].replace({'None': 0, 'Sleep Apnea': 1, 'Insomnia': 1}).fillna(0).astype(int)
 
-# OVERSAMPLING (Supaya hasil gak normal terus)
+# OVERSAMPLING
 data_ok = df[df['Sleep Disorder'] == 0]
 data_sakit = df[df['Sleep Disorder'] == 1]
 df_bal = pd.concat([data_ok, data_sakit, data_sakit], axis=0).reset_index(drop=True)
@@ -56,7 +54,7 @@ y = df_bal['Sleep Disorder'].values
 X_min = X.min(axis=0)
 X_max = X.max(axis=0)
 
-# 3. TRAINING
+# 3. TRAINING MANUAL
 def split(X, y, f, t):
     m = X[:, f] < t
     return X[m], y[m], X[~m], y[~m]
@@ -97,4 +95,4 @@ data = {'forest': forest, 'X_min': X_min, 'X_max': X_max, 'feature_names': feats
 with open(MODEL_PATH, 'wb') as f:
     pickle.dump(data, f)
 
-print(f"\nSUKSES! File ada di: {MODEL_PATH}")
+print(f"\nSUKSES! File model telah disimpan di: {MODEL_PATH}")
