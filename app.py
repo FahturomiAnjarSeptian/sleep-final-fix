@@ -11,29 +11,34 @@ import os
 
 app = Flask(__name__)
 
-# --- KONFIGURASI PATH ABSOLUT (PENTING) ---
+# --- KONFIGURASI JALUR MUTLAK (SAMA DENGAN TRAIN_MODEL) ---
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 MODEL_PATH = os.path.join(BASE_DIR, 'model_sleep.pkl')
 
-# --- DEFINISI VARIABEL GLOBAL (Agar tidak error 'Not Defined') ---
+# --- DEFINISI VARIABEL ANTI-CRASH (Inisialisasi Awal) ---
+# Kita buat variabel ini DULUAN sebelum load model
+# Supaya tidak pernah ada error "NameError: X_min is not defined"
 forest = []
-X_min = np.zeros(12) # Default dummy
-X_max = np.ones(12)  # Default dummy
 feature_names = []
+# Default dummy (angka 0) agar perhitungan matematika tidak error
+X_min = np.zeros(12) 
+X_max = np.ones(12)
 
 # --- LOAD MODEL ---
 try:
     with open(MODEL_PATH, 'rb') as f:
         data = pickle.load(f)
+    # Jika berhasil, baru kita timpa variabel dummy tadi
     forest = data.get('forest', [])
     X_min = data.get('X_min', np.zeros(12))
     X_max = data.get('X_max', np.ones(12))
     feature_names = data.get('feature_names', [])
-    print(f"Model berhasil dimuat dari {MODEL_PATH}", file=sys.stderr)
+    print(f"INFO: Model berhasil dimuat dari {MODEL_PATH}", file=sys.stderr)
 except Exception as e:
-    print(f"GAGAL LOAD MODEL dari {MODEL_PATH}: {e}", file=sys.stderr)
+    # Jika gagal, dia akan tetap jalan pakai variabel dummy (tidak crash)
+    print(f"WARNING: Gagal load model dari {MODEL_PATH}. Error: {e}", file=sys.stderr)
 
-# --- FUNGSI ---
+# --- FUNGSI PENDUKUNG ---
 def predict_single_tree(tree, x):
     if not isinstance(tree, dict): return 0
     if 'label' in tree: return tree['label']
@@ -72,10 +77,11 @@ def index():
     
     if request.method == 'POST':
         try:
-            # PENTING: Jika model kosong, beri peringatan tapi JANGAN CRASH
+            # Cek apakah model sudah terisi
             if not forest:
-                return render_template('index.html', prediction_text="<h3 style='color:red'>Error: Model file tidak ditemukan atau kosong. Cek Log Error.</h3>")
+                return render_template('index.html', prediction_text=f"<h3 style='color:red'>Error: Model file tidak ditemukan di {MODEL_PATH}. Jalankan python train_model.py di server!</h3>")
 
+            # Input Form (12 Fitur)
             raw_vals = [
                 float(request.form.get('gender', 0)), float(request.form.get('age', 30)),
                 float(request.form.get('occupation', 2)), float(request.form.get('sleep_duration', 7)),
@@ -86,29 +92,33 @@ def index():
             ]
             
             input_arr = np.array(raw_vals)
+            # Scaling aman karena X_min sudah pasti ada (meski dummy)
             input_scaled = (input_arr - X_min) / (X_max - X_min + 1e-8)
             
             votes = []
-            debug_info = "<div style='background:#eee; padding:10px; font-size:12px; margin-top:10px'><b>DEBUG:</b><br>"
+            debug_info = "<div style='background:#f9f9f9; padding:10px; font-size:12px; margin-top:10px; border:1px solid #ccc'><b>🔍 DEBUG MODE:</b><br>"
+            
             for i, t in enumerate(forest):
                 v = predict_single_tree(t, input_scaled)
-                if v is not None and not np.isnan(v):
-                    votes.append(int(v))
-                    debug_info += f"Tree {i+1}: {int(v)}<br>"
+                val = 0
+                if v is not None and not np.isnan(v): val = int(v)
+                votes.append(val)
+                debug_info += f"Pohon {i+1}: Prediksi {val}<br>"
             
             final_pred = 0
             if votes: final_pred = int(np.round(np.mean(votes)))
-            debug_info += f"<b>Final: {final_pred}</b></div>"
+            
+            debug_info += f"<br><b>Rata-rata: {np.mean(votes):.2f}</b><br><b>Keputusan Akhir: {final_pred}</b></div>"
 
             status = "NORMAL (SEHAT)" if final_pred == 0 else "TERDETEKSI GANGGUAN TIDUR"
             color = "green" if final_pred == 0 else "red"
             prediction_text = f"<h2 style='color:{color}'>{status}</h2>{debug_info}"
             
             for i in range(min(3, len(forest))):
-                img = get_tree_image(forest[i], feature_names, f"Tree {i+1}")
+                img = get_tree_image(forest[i], feature_names, f"Struktur Pohon {i+1}")
                 if img: tree_plots.append(img)
                         
         except Exception as e:
-            prediction_text = f"Error System: {str(e)}"
+            prediction_text = f"<span style='color:red'>Error Sistem: {str(e)}</span>"
 
     return render_template('index.html', prediction_text=prediction_text, tree_plots=tree_plots)
